@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<!-- saved from url=(0070)https://bl.ocks.org/officeofjane/raw/47d2b0bfeecfcb41d2212d06d095c763/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <script src="https://d3js.org/d3.v4.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3-annotation/1.12.1/d3-annotation.min.js"></script>
+  <style>
+    body {
+      font-family:"avenir next", Arial, sans-serif;
+      font-size: 12px;
+      color: #696969;
+    }
+
+    :root {
+      --line-chart-color: #607D8B;//;
+      --annotation-context-color: #2E8B57;//546E7A;
+      --annotation-badge-color:white;
+      --annotation-color: #E8336D; //
+    }
+
+    .annotation path {
+      stroke: var(--annotation-badge-color);
+    }
+
+    .annotation:not(.above):not(.anomaly) path {
+      stroke-dasharray: 1,3;
+    }
+
+    .annotation text {
+      fill: var(--annotation-badge-color);
+    }
+
+    .annotation-note-bg {
+      fill: rgba(0, 0, 0, 0);
+    }
+
+    .annotation-note-title, text.title {
+      font-weight: bold;
+    }
+
+    svg .annotation.rect text {
+      fill: var(--annotation-context-color);
+      font-size: .9em;
+      text-transform: uppercase;
+    }
+
+    svg .annotation.callout.rect path.subject{
+      fill-opacity: .1;
+    }
+
+    svg .annotation.callout.rect path.subject {
+      fill: var(--annotation-context-color);
+      stroke: none;
+      stroke-dasharray: 2, 8;
+    }
+
+    svg .annotation.badge .annotation-subject path{
+        fill: var(--annotation-color);
+        stroke-width: 0px;
+        stroke-dasharray: none;
+    }
+
+    svg .annotation.badge path.subject-pointer {
+        stroke-width: 0px; 
+    }
+
+    svg .annotation.badge text {
+      font-size: .7em;
+    }
+
+    #play-button {
+      position: absolute;
+      top: 527px;
+      left: 100px;
+      background: #f08080;
+      padding-right: 26px;
+      border-radius: 3px;
+      border: none;
+      color: white;
+      margin: 0;
+      padding: 0 12px;
+      width: 60px;
+      cursor: pointer;
+      height: 30px;
+    }
+
+    #play-button:hover {
+      background-color: #696969;
+    }    
+    
+    .ticks {
+      font-size: 10px;
+    }
+
+    .track,
+    .track-inset,
+    .track-overlay {
+      stroke-linecap: round;
+    }
+
+    .track {
+      stroke: #000;
+      stroke-opacity: 0.3;
+      stroke-width: 10px;
+    }
+
+    .track-inset {
+      stroke: #dcdcdc;
+      stroke-width: 8px;
+    }
+
+    .track-overlay {
+      pointer-events: stroke;
+      stroke-width: 50px;
+      stroke: transparent;
+      cursor: crosshair;
+    }
+
+    .handle {
+      fill: #fff;
+      stroke: #000;
+      stroke-opacity: 0.5;
+      stroke-width: 1.25px;
+    }
+
+
+
+    .axis--x path {
+      display: none;
+    }
+
+    .line {
+      fill: none;
+      stroke: steelblue;
+      stroke-width: 1.5px;
+    }
+
+
+  </style>
+</head>
+
+<body>
+<div id="vis">
+  <button id="play-button">Play</button>
+</div>
+<script>
+
+var formatDateIntoYear = d3.timeFormat("%Y");
+var formatDateIntoMonth = d3.timeFormat("%b");
+var formatDate = d3.timeFormat("%b %Y");
+var parseDate = d3.timeParse("%m/%d/%y");
+
+var startDate = new Date("2016-04-01"), //2013-09-05
+    endDate = new Date("2018-04-06");
+
+var margin = {top:50, right:50, bottom:50, left:100},
+    width = 960 - margin.left - margin.right,
+    height = 1000 - 3*margin.top - margin.bottom;
+
+var svg = d3.select("#vis")
+    .append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + 3*margin.top + margin.bottom);  
+
+////////// slider //////////
+
+var moving = false;
+var currentValue = 0;
+var targetValue = width;
+
+var playButton = d3.select("#play-button");
+    
+var xScale = d3.scaleTime()
+    .domain([startDate, endDate])
+    .range([0, targetValue])
+    .clamp(true);
+
+// y-scale
+
+var g1 = svg.append("g")
+    .attr("class", "mainplot")
+    .attr("transform", "translate(" + 0 + "," + 425 + ")");
+
+var slider = g1.append("g")
+    .attr("class", "slider")
+    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+    //.attr("transform", "translate(" + margin.left + "," + margin.top + ")")
+
+
+slider.append("line")
+    .attr("class", "track")
+    .attr("x1", xScale.range()[0])
+    .attr("x2", xScale.range()[1])
+  .select(function() { return this.parentNode.appendChild(this.cloneNode(true)); })
+    .attr("class", "track-inset")
+  .select(function() { return this.parentNode.appendChild(this.cloneNode(true)); })
+    .attr("class", "track-overlay")
+    .call(d3.drag()
+        .on("start.interrupt", function() { slider.interrupt(); })
+        .on("start drag", function() {
+          currentValue = d3.event.x;
+          update(xScale.invert(currentValue)); 
+        })
+    );
+
+slider.insert("g", ".track-overlay")
+    .attr("class", "ticks")
+    .attr("transform", "translate(0," + 18 + ")")
+  .selectAll("text")
+    .data(xScale.ticks(10))
+    .enter()
+    .append("text")
+    .attr("x", xScale)
+    .attr("y", 10)
+    .attr("text-anchor", "middle")
+    .text(function(d) { return formatDate(d); }); //
+
+var handle = slider.insert("circle", ".track-overlay")
+    .attr("class", "handle")
+    .attr("r", 9);
+
+var label = slider.append("text")  
+    .attr("class", "label")
+    .attr("text-anchor", "middle")
+    .text(formatDate(startDate))
+    .attr("transform", "translate(0," + (-25) + ")")
+
+
+////////// plot //////////
+
+var dataset;
+
+var plot = g1.append("g")
+    .attr("class", "plot")
+    .attr("transform", "translate(" + margin.left + "," + 3*margin.top + ")");
+
+
+var yScale = d3.scaleLinear()
+  .domain([-0.4,0.5])
+  .range([height-500, 0]);
+
+
+var xAxis = d3.axisBottom().scale(xScale);
+var yAxis = d3.axisLeft().scale(yScale);
+
+
+
+//var line = d3.line()
+//    .x(d => x(d.date))
+//    .y(d => yScale(d.corr)); //.curve(d3.curveBasis)
+
+//d3.csv("corr.csv", prepare, function(data) {
+//  plot.append("path")
+//   .datum(data)
+//   .attr("d", line)
+//   .attr("class", "linestyle");
+// })
+
+
+g1.append("g")                                 
+      .attr("class", "xAxis")
+      .attr("transform", `translate (${margin.left}, ${3*margin.top+yScale(0)})`)
+      .call(xAxis);
+
+g1.append("g")
+    .attr("class", "yAxis")
+    .attr("transform", `translate (${margin.left}, ${3*margin.top})`)
+    .call(yAxis)
+    .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("y", 6)
+      .attr("dy", "0.71em")
+      .attr("fill", "#000")
+      .style("font", "15px sans-serif")
+      .text("90-Day correlation");
+    
+
+d3.csv("corr2.csv", prepare, function(data) {
+  dataset = data;
+  drawPlot(dataset);
+  //console.log(dataset)
+  playButton
+    .on("click", function() {
+    var button = d3.select(this);
+    if (button.text() == "Pause") {
+      moving = false;
+      clearInterval(timer);
+      // timer = 0;
+      button.text("Play");
+    } else {
+      moving = true;
+      timer = setInterval(step, 100);
+      button.text("Pause");
+    }
+    console.log("Slider moving: " + moving);
+  })
+})
+
+function prepare(d) {
+  d.corr = d.corr;
+  d.date = parseDate(d.date);
+  return d;
+}
+  
+function step() {
+  update(xScale.invert(currentValue));
+  currentValue = currentValue + (targetValue/151);
+  if (currentValue > targetValue) {
+    moving = false;
+    currentValue = 0;
+    clearInterval(timer);
+    // timer = 0;
+    playButton.text("Play");
+    console.log("Slider moving: " + moving);
+  }
+}
+
+function drawPlot(data) {
+  var locationss = plot.selectAll(".location")
+    .data(data);
+
+  
+  
+  // if filtered dataset has more circles than already existing, transition new ones in
+  locationss
+    .enter()
+    .append("circle")
+    .attr("class", "location")
+    .attr("cx", function(d) { return xScale(d.date); })
+    .attr("cy", d => yScale(d.corr))
+    .style("fill", function(d) { return d3.rgb(86,180,233)})
+    .style("stroke", function(d) { return d3.rgb(86,180,233)})
+    .style("opacity", 0.5)
+    .attr("r", 5)
+      .transition()
+      .duration(400)
+      .attr("r", 8)
+        .transition()
+        .attr("r", 5);
+
+  // if filtered dataset has less circles than already existing, remove excess
+  locationss.exit()
+    .remove();
+}
+
+function update(h) {
+  // update position and text of label according to slider scale
+  handle.attr("cx", xScale(h));
+  label
+    .attr("x", xScale(h))
+    .text(formatDate(h));
+
+  // filter data set and redraw plot
+  var newData = dataset.filter(function(d) {
+    return d.date < h;
+  })
+  drawPlot(newData);
+}
+
+
+// Line
+
+var margin2 = {top: 20, right: 80, bottom: 30, left: 100},
+    width2 = 960 - margin2.left - margin2.right,
+    height2 = 500 - margin2.top - margin2.bottom;
+
+
+var g2 = svg.append("g").attr("class", "volumeplot").attr("transform", "translate(" + margin2.left + "," + margin2.top + ")");
+
+
+var parseTime = d3.timeParse("%y%m%d"); 
+
+var x = d3.scaleTime().range([0, width]),
+    y = d3.scaleLinear().range([height2, 0]),
+    z = d3.scaleOrdinal(d3.schemeCategory10);
+
+var line = d3.line()
+    .curve(d3.curveBasis)
+    .defined(function(d) { return !isNaN(d.volume); })
+    .x(function(d) { return x(d.date); })
+    .y(function(d) { return y(d.volume); });
+
+d3.tsv("close.tsv", type, function(error, data) {
+  if (error) throw error;
+
+  var cities = data.columns.slice(1).map(function(id) {
+    return {
+      id: id,
+      values: data.map(function(d) {
+        return {date: d.date, volume: d[id]};
+      })
+    };
+  });
+
+  x.domain([startDate, endDate])
+
+  y.domain([
+    d3.min(cities, function(c) { return d3.min(c.values, function(d) { return d.volume; }); }),
+    d3.max(cities, function(c) { return d3.max(c.values, function(d) { return d.volume; }); })
+  ]);
+
+  z.domain(cities.map(function(c) { return c.id; }));
+
+  // g2.append("g")
+  //     .attr("class", "axis axis--x")
+  //     .attr("transform", "translate(0," + height2 + ")")
+  //     .call(d3.axisBottom(x));
+
+  g2.append("g")
+      .attr("class", "axis axis--y")
+      .call(d3.axisLeft(y))
+    .append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("y", 6)
+      .attr("dy", "0.71em")
+      .attr("fill", "#000")
+      .style("font", "15px sans-serif")
+      .text("Close Price, $");
+
+  var city = g2.selectAll(".city")
+    .data(cities)
+    .enter().append("g")
+      .attr("class", "city");
+
+  city.append("path")
+      .attr("class", "line")
+      .attr("d", function(d) { return line(d.values); })
+      .style("stroke", function(d) { return z(d.id); });
+
+  city.append("text")
+      .attr("x", 700)
+      .attr("y", 220)
+      .attr("dy", "0.35em")
+      .style("font", "15px sans-serif")
+      .text("Bitcoin");
+
+  city.append("text")
+      .attr("x", 700)
+      .attr("y", 375)
+      .attr("dy", "0.35em")
+      .style("font", "15px sans-serif")
+      .text("Stock");
+      //.attr("transform", function(d) { return "translate(" + xScale(endDate) + "," + yScale(d.value.volume) + ")"; })
+
+  
+});
+
+function type(d, _, columns) {
+
+  d.date = d3.timeParse("%Y-%m-%d")(d.date);
+  for (var i = 1, n = columns.length, c; i < n; ++i) d[c = columns[i]] = +d[c];
+  return d;
+}
+
+
+const annotations = [
+        
+        {
+          note: { 
+            title: "Price +300%", 
+            lineType: "none", 
+            align: "right",
+            wrap: 150 //custom text wrapping
+          },//height - margin.top - margin.bottom,
+          subject: {
+            height: height2,
+            width: xScale(new Date("1/1/2018")) - xScale(new Date("2/1/2018"))
+          },
+          type: d3.annotationCalloutRect,
+          y: 0,
+          disable: ["connector"], // doesn't draw the connector
+          //can pass "subject" "note" and "connector" as valid options
+          dx: 0,
+          data: { x: "12/16/2017"},
+        }]
+
+
+const makeAnnotations = d3.annotation()
+  .type(type)
+  .accessors({ 
+    x: function(d){ return xScale(new Date(d.x))}
+  })
+  .annotations(annotations)
+
+g2.append("g")
+  .attr("class", "annotation1")
+  .call(makeAnnotations) //.attr("transform", "translate(0," + height2 + ")")
+////////////
+// const annotations2 = [
+        
+//         {
+//           note: { 
+//             title: "Price -300%", 
+//             lineType: "none", 
+//             align: "left",
+//             wrap: 150 //custom text wrapping
+//           },//height - margin.top - margin.bottom,
+//           subject: {
+//             height: height2,
+//             width: xScale(new Date("1/1/2018")) - xScale(new Date("2/1/2018"))
+//           },
+//           type: d3.annotationCalloutRect,
+//           y: 0,
+//           disable: ["connector"], // doesn't draw the connector
+//           //can pass "subject" "note" and "connector" as valid options
+//           dx: 0,
+//           data: { x: "2/1/2018"},
+//         }]
+
+
+// const makeAnnotations2 = d3.annotation()
+//   .type(type)
+//   .accessors({ 
+//     x: function(d){ return xScale(new Date(d.x))}
+//   })
+//   .annotations(annotations)
+
+// g2.append("g")
+//   .attr("class", "annotation2")
+//   .call(makeAnnotations2) //.attr("transform", "translate(0," + height2 + ")")
+
+// city.append("text")
+//       .attr("x", 100)
+//       .attr("y", 100)
+//       .attr("fill", "#D3D3D3")
+//       .attr("text-anchor", "middle")
+//       .style("font", "15px sans-serif")
+//       .text("Press play and observe the trend in correlations or pause and navigate to the region of interest"); 
+
+// const annotations2 = [
+// {
+//   note: { 
+//     label: "Hi"},
+//     x: 100, 
+//     y: 100,
+//     dy: 150, 
+//     dx: 150,
+//   subject: { radius: 50, radiusPadding: 10 }
+// }]
+
+// g2.append("g")
+//   .attr("class", "annotation1")
+//   .call(d3.annotation().annotations(annotations2))
+
+
+</script>
+
+</body></html>
